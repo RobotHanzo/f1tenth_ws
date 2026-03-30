@@ -73,7 +73,15 @@ class PurePursuitLogic:
                     final_i = i
                     break
 
+            # As a final fallback, always use the nearest waypoint so controller never stalls.
+            if final_i == -1:
+                final_i = int(np.argmin(distances))
+
+            self.current_idx = final_i
+
         target_pt_car = self.transform_point_to_car_frame(car_x, car_y, car_yaw, self.waypoints[final_i, :2])
+        if longest_dist <= 0.0:
+            longest_dist = np.linalg.norm(target_pt_car)
         return target_pt_car, longest_dist, final_i
 
     def calculate_steering(self, target_point, lookahead_dist, k_p):

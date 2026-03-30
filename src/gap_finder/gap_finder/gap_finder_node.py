@@ -4,6 +4,8 @@ from rclpy.node import Node
 import numpy as np
 from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped, AckermannDrive
+from std_msgs.msg import String
+from state_machine.drive_state import DriveState
 
 class GapFinderNode(Node):
     """ 
@@ -18,8 +20,10 @@ class GapFinderNode(Node):
 
         # TODO: Subscribe to LIDAR
         self.subscription = self.create_subscription(LaserScan,lidarscan_topic,self.lidar_callback,10)
+        self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
         # TODO: Publish to drive
         self.publisher = self.create_publisher(AckermannDriveStamped,drive_topic,10)
+        self.current_state = DriveState.GB_TRACK
 
         self.safety_bubble_diameter = 0.2
         self.lookahead = 10
@@ -33,6 +37,12 @@ class GapFinderNode(Node):
         self.do_limit_fov = True
         self.do_mark_minimum = True
         self.do_mark_disparity = True
+
+    def state_callback(self, msg):
+        try:
+            self.current_state = DriveState(msg.data)
+        except ValueError:
+            self.get_logger().warn(f"Unknown state received: {msg.data}")
 
     def preprocess_lidar(self, ranges):
         """ Preprocess the LiDAR scan array. Expert implementation includes:
@@ -121,7 +131,7 @@ class GapFinderNode(Node):
         steering = angle_increment * (max_gap_index-proc_ranges.shape[0]//2)
 
         # steering = 0.3
-        print(f"Steering: {steering}")
+        # print(f"Steering: {steering}")
         ackermann = {"speed": self.speed, "steering": steering}
 
         return ackermann
@@ -129,6 +139,9 @@ class GapFinderNode(Node):
     def lidar_callback(self, scan_msg):
         """ Process each LiDAR scan as per the Follow Gap algorithm & publish an AckermannDriveStamped Message
         """
+        if self.current_state != DriveState.FTGONLY:
+            return
+
         drive = self.update(scan_msg)
         drive_msg = AckermannDriveStamped()
 

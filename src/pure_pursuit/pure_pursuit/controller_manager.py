@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
+import os
 import rclpy
 from rclpy.node import Node
 import numpy as np
-import tf2_ros
+from ament_index_python.packages import get_package_share_directory
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 from ackermann_msgs.msg import AckermannDriveStamped
-from visualization_msgs.msg import Marker, MarkerArray
+from visualization_msgs.msg import Marker
 from geometry_msgs.msg import Point
 from pure_pursuit.pure_pursuit_logic import PurePursuitLogic
-from pure_pursuit.ftg_logic import FTGLogic
+from state_machine.drive_state import DriveState
 
 class ControllerManager(Node):
     def __init__(self):
         super().__init__('controller_manager_node')
 
-        self.declare_parameter("waypoints_path", "/sim_ws/src/pure_pursuit/racelines/arc.csv")
+        default_waypoints_path = os.path.join(
+            get_package_share_directory('pure_pursuit'),
+            'racelines',
+            'arc.csv',
+        )
+        self.declare_parameter("waypoints_path", default_waypoints_path)
         self.declare_parameter("odom_topic", "/ego_racecar/odom")
         self.declare_parameter("drive_topic", "/drive")
         self.declare_parameter("min_lookahead", 2.0)
@@ -39,17 +44,18 @@ class ControllerManager(Node):
         self.wheelbase = self.get_parameter("wheelbase").value
 
         # 2. Initialize Logic & Data
+        if not os.path.exists(self.path):
+            self.get_logger().error(f"Waypoints file not found: {self.path}")
+            raise FileNotFoundError(self.path)
+
         self.waypoints = np.loadtxt(self.path, delimiter=',', skiprows=1) # Assume x, y, v
         self.pure_pursuit_logic = PurePursuitLogic(self.wheelbase, self.waypoints)
-        self.ftg_logic = FTGLogic()
         self.curr_velocity = 0.0
-        self.current_state = "GB_TRACK" 
-        self.latest_scan = None
+        self.current_state = DriveState.GB_TRACK
 
         # 3. Pubs & Subs
         self.drive_pub = self.create_publisher(AckermannDriveStamped, self.drive_topic, 10)
         self.odom_sub = self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
-        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.state_sub = self.create_subscription(String, '/state', self.state_callback, 10)
 
         self.get_logger().info("Pure Pursuit Node Started")
@@ -60,14 +66,15 @@ class ControllerManager(Node):
         self.create_timer(1.0, self.publish_static_path)
 
     def state_callback(self, msg):
-        if msg.data != self.current_state:
-            self.get_logger().info(f"--- STATE SWITCH: {self.current_state} -> {msg.data} ---")
-            if msg.data == "GB_TRACK":
-                self.ftg_logic.prev_steering = 0.0
-        self.current_state = msg.data
-    
-    def scan_callback(self, msg):
-        self.latest_scan = msg
+        try:
+            new_state = DriveState(msg.data)
+        except ValueError:
+            self.get_logger().warn(f"Unknown state received: {msg.data}")
+            return
+
+        if new_state != self.current_state:
+            self.get_logger().info(f"--- STATE SWITCH: {self.current_state.value} -> {new_state.value} ---")
+        self.current_state = new_state
 
     def get_yaw_from_quat(self, q):
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
@@ -75,21 +82,13 @@ class ControllerManager(Node):
         return np.arctan2(siny_cosp, cosy_cosp)
 
     def odom_callback(self, msg):
-        self.get_logger().info(f"DEBUG: Active Logic: {self.current_state}", throttle_duration_sec=1.0)
+        # self.get_logger().info(f"DEBUG: Active Logic: {self.current_state}", throttle_duration_sec=1.0)
         self.curr_velocity = msg.twist.twist.linear.x
-        
-        if self.current_state == "FTGONLY":
-            self.execute_ftg_logic()
-        else:
-            self.execute_pure_pursuit_logic(msg)
-    
-    def execute_ftg_logic(self):
-        if self.latest_scan is None:
+
+        if self.current_state != DriveState.GB_TRACK:
             return
-            
-        speed, steer = self.ftg_logic.process_lidar(self.latest_scan)
-        # self.get_logger().warn(f"FTG Active: Steer={steer:.2f}, Speed={speed:.2f}", throttle_duration_sec=1.0)
-        self.publish_drive(steer, speed)
+
+        self.execute_pure_pursuit_logic(msg)
 
     def execute_pure_pursuit_logic(self, msg):
         car_x = msg.pose.pose.position.x

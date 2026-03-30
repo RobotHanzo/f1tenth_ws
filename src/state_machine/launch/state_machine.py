@@ -11,5 +11,17 @@ def generate_launch_description():
             executable='state_machine',
             name='state_machine',
             output='screen',
-        )
+        ),
+        Node(
+            package='gap_finder',
+            executable='gap_finder_node',
+            name='gap_finder_node',
+            output='screen',
+        ),
+        Node(
+            package='pure_pursuit',
+            executable='controller_manager_node',
+            name='controller_manager_node',
+            output='screen',
+        ),
     ])

@@ -10,6 +10,7 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from std_msgs.msg import String
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
+from state_machine.drive_state import DriveState
 
 class StateMachine(Node):
     def __init__(self):
@@ -19,10 +20,7 @@ class StateMachine(Node):
         self.safe_count = 0          
         self.required_safe_samples = 5 
 
-        # Definition of States
-        self.GB_TRACK = "GB_TRACK"    
-        self.FTGONLY = "FTGONLY"  
-        self.current_state = self.GB_TRACK
+        self.current_state = DriveState.GB_TRACK
 
         self.safety_dist = 0.5
         self.return_dist = 1
@@ -46,9 +44,9 @@ class StateMachine(Node):
             min_dist = min(valid_ranges)
             now = time.time()
             new_state = self.current_state
-            if self.current_state == self.GB_TRACK:
+            if self.current_state == DriveState.GB_TRACK:
                 if min_dist < self.safety_dist:
-                    new_state = self.FTGONLY
+                    new_state = DriveState.FTGONLY
                     self.ftg_start_time = now
                     self.safe_count = 0
             else:
@@ -59,12 +57,12 @@ class StateMachine(Node):
                     self.safe_count = 0
                 
                 if self.safe_count >= self.required_safe_samples or duration > self.max_ftg_allowance:
-                    new_state = "GB_TRACK"
+                    new_state = DriveState.GB_TRACK
                     self.ftg_start_time = None 
 
             # print out log at state transition
             if new_state != self.current_state:
-                if new_state == self.FTGONLY:
+                if new_state == DriveState.FTGONLY:
                     self.get_logger().warn(f"[DETECTED] Obstacle at {min_dist:.2f}m! Switching to FTGONLY")
                 else:
                     self.get_logger().info(f"[CLEAR] Path is clear. Returning to GB_TRACK")
@@ -73,7 +71,7 @@ class StateMachine(Node):
 
             # publish state to controller
             state_msg = String()
-            state_msg.data = self.current_state
+            state_msg.data = self.current_state.value
             self.state_pub.publish(state_msg)
 
 def main(args=None):
