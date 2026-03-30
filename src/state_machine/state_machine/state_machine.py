@@ -12,12 +12,19 @@ class StateMachine(Node):
         super().__init__('state_machine')
         self.current_state = DriveState.GB_TRACK
 
+        # Topic publishing flattened Frenet obstacle points: [s0, d0, s1, d1, ...].
         self.declare_parameter('obs_topic', '/obs_wpts')
+        # Lateral distance threshold (meters) below which FTG is activated.
         self.declare_parameter('safety_lateral_distance', 0.5)
+        # Longitudinal trigger window in Frenet s (meters) around the car.
         self.declare_parameter('trigger_distance', 3.0)
+        # Maximum age (seconds) of obs_topic data before lidar fallback is used.
         self.declare_parameter('obs_timeout_sec', 0.5)
+        # Lidar topic used only as fallback when Frenet obstacle data is stale.
         self.declare_parameter('scan_topic', '/scan')
+        # Fallback trigger distance (meters): closer than this enters FTG.
         self.declare_parameter('scan_trigger_distance', 0.7)
+        # Fallback clear distance (meters): farther than this returns to GB_TRACK.
         self.declare_parameter('scan_clear_distance', 1.2)
         self.obs_topic = self.get_parameter('obs_topic').value
         self.safety_lateral_distance = float(self.get_parameter('safety_lateral_distance').value)
